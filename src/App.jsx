@@ -1371,7 +1371,7 @@ function SettingsState({ settings, notice, onUpdate, onTest, onClear }) {
           <button type="button" onClick={onClear}>清理历史</button>
         </div>
       </section>
-      <p className="settings-version">v0.2.5</p>
+      <p className="settings-version">v0.2.6</p>
     </div>
   );
 }

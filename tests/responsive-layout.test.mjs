@@ -27,7 +27,7 @@ test("矮视口会压缩结果预览图，为底部操作栏保留空间", () =>
 });
 
 test("设置页内容底部显示弱化版本号", () => {
-  assert.match(app, /<section className="settings-group settings-group--last">[\s\S]*?<p className="settings-version">v0\.2\.5<\/p>/);
+  assert.match(app, /<section className="settings-group settings-group--last">[\s\S]*?<p className="settings-version">v0\.2\.6<\/p>/);
   assert.match(styles, /\.settings-version\s*\{[\s\S]*?margin:\s*28px 0 4px;[\s\S]*?font-size:\s*12px;[\s\S]*?text-align:\s*center;/);
   assert.doesNotMatch(styles, /\.settings-version\s*\{[^}]*position:\s*(fixed|sticky);/);
 });

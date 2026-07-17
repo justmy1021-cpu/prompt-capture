@@ -25,7 +25,7 @@ Prompt Capture 是一款基于 Chrome Manifest V3 的视觉灵感采集扩展。
 ### 使用 Release 安装包
 
 1. 打开仓库右侧的 **Releases** 页面。
-2. 下载最新版本的 `Prompt-Capture-v0.2.5.zip`。
+2. 下载最新版本的 `Prompt-Capture-v0.2.6.zip`。
 3. 将 ZIP 完整解压到一个固定文件夹，不要直接从压缩包内打开。
 4. 在 Chrome 地址栏输入 `chrome://extensions/`。
 5. 打开页面右上角的“开发者模式”。
@@ -110,4 +110,4 @@ dist/      可直接加载的生产构建
 
 ## 当前版本
 
-`v0.2.5`
+`v0.2.6`
