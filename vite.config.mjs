@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const providerModulePath = fileURLToPath(new URL("./src/model-providers.js", import.meta.url));
+const activeSessionModulePath = fileURLToPath(new URL("./src/active-session.js", import.meta.url));
 
 export default defineConfig({
   build: {
@@ -20,12 +21,17 @@ export default defineConfig({
   plugins: [
     react(),
     {
-      name: "emit-model-providers",
+      name: "emit-extension-modules",
       generateBundle() {
         this.emitFile({
           type: "asset",
           fileName: "model-providers.js",
           source: readFileSync(providerModulePath, "utf8"),
+        });
+        this.emitFile({
+          type: "asset",
+          fileName: "active-session.js",
+          source: readFileSync(activeSessionModulePath, "utf8"),
         });
       },
     },
