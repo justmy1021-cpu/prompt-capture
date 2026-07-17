@@ -1,0 +1,25 @@
+# Dependencies and caches
+node_modules/
+.npm-cache/
+*.log
+
+# Local configuration
+.npmrc
+.env
+.env.*
+!.env.example
+
+# macOS and editors
+.DS_Store
+.idea/
+.vscode/
+
+# Internal project materials
+AGENTS.md
+EXTENSION-README.md
+design-qa.md
+qa/
+visual-qa/
+
+# Release archives
+Prompt-Capture-*.zip

@@ -1,0 +1,39 @@
+<svg shape-rendering="crispEdges" preserveAspectRatio="none" viewBox="0 0 144 224" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      #dissolve-pixels rect { width: 1px; height: 1px; }
+    </style>
+    <linearGradient id="fade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#000"/>
+      <stop offset="0.2" stop-color="#333"/>
+      <stop offset="0.48" stop-color="#888"/>
+      <stop offset="0.76" stop-color="#e8e8e8"/>
+      <stop offset="1" stop-color="#fff"/>
+    </linearGradient>
+    <mask id="dissolve" maskUnits="userSpaceOnUse" x="0" y="0" width="144" height="224" style="mask-type:luminance">
+      <rect width="144" height="224" fill="url(#fade)"/>
+      <g id="dissolve-pixels" fill="#000">
+        <rect x="5" y="10"/><rect x="20" y="1"/><rect x="35" y="14"/>
+        <rect x="2" y="31"/><rect x="17" y="39"/><rect x="31" y="28"/>
+        <rect x="8" y="57"/><rect x="23" y="66"/><rect x="39" y="53"/>
+        <rect x="1" y="82"/><rect x="18" y="91"/><rect x="33" y="78"/>
+        <rect x="6" y="112"/><rect x="22" y="106"/><rect x="41" y="120"/>
+        <rect x="1" y="139"/><rect x="16" y="151"/><rect x="31" y="140"/>
+        <rect x="7" y="174"/><rect x="25" y="164"/><rect x="42" y="180"/>
+        <rect x="2" y="201"/><rect x="18" y="211"/><rect x="36" y="198"/>
+        <rect x="51" y="5"/><rect x="64" y="20"/><rect x="76" y="9"/>
+        <rect x="49" y="43"/><rect x="61" y="57"/><rect x="79" y="39"/>
+        <rect x="54" y="81"/><rect x="70" y="96"/><rect x="84" y="74"/>
+        <rect x="48" y="124"/><rect x="63" y="137"/><rect x="82" y="117"/>
+        <rect x="55" y="166"/><rect x="72" y="181"/><rect x="86" y="158"/>
+        <rect x="49" y="207"/><rect x="66" y="197"/><rect x="82" y="215"/>
+        <rect x="96" y="17"/><rect x="111" y="34"/><rect x="126" y="8"/>
+        <rect x="101" y="65"/><rect x="119" y="83"/>
+        <rect x="95" y="111"/><rect x="114" y="128"/><rect x="130" y="104"/>
+        <rect x="103" y="159"/><rect x="121" y="178"/>
+        <rect x="97" y="207"/><rect x="116" y="215"/><rect x="133" y="196"/>
+      </g>
+    </mask>
+  </defs>
+  <rect width="144" height="224" fill="#fff" mask="url(#dissolve)"/>
+</svg>
