@@ -8,6 +8,7 @@ import {
   normalizeModelSettings,
   validateModelSettings,
 } from "./model-providers.js";
+import { resolveCropRect } from "./capture-geometry.js";
 
 const MESSAGE = {
   TOGGLE_TOOLBAR: "prompt-capture/toggle-toolbar-v7",
@@ -312,11 +313,7 @@ async function cropScreenshot(dataUrl, selection) {
   const response = await fetch(dataUrl);
   const blob = await response.blob();
   const bitmap = await createImageBitmap(blob);
-  const dpr = selection.devicePixelRatio || 1;
-  const sx = clamp(Math.round(selection.x * dpr), 0, bitmap.width - 1);
-  const sy = clamp(Math.round(selection.y * dpr), 0, bitmap.height - 1);
-  const sw = clamp(Math.round(selection.width * dpr), 1, bitmap.width - sx);
-  const sh = clamp(Math.round(selection.height * dpr), 1, bitmap.height - sy);
+  const { sx, sy, sw, sh } = resolveCropRect(bitmap.width, bitmap.height, selection);
   const canvas = new OffscreenCanvas(sw, sh);
   canvas.getContext("2d").drawImage(bitmap, sx, sy, sw, sh, 0, 0, sw, sh);
   bitmap.close?.();

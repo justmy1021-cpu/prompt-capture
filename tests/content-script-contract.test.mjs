@@ -25,9 +25,14 @@ test("后台与内容脚本使用同一组升级消息通道", () => {
 });
 
 test("内容脚本版本随消息通道升级，允许替换已打开页面的旧实例", () => {
-  assert.match(contentSource, /const VERSION = "2026-07-17-selection-border-v14"/);
+  assert.match(contentSource, /const VERSION = "2026-07-17-capture-geometry-v15"/);
   assert.match(backgroundSource, /tabs that predate an update/);
   assert.match(backgroundSource, /chrome\.scripting\.executeScript/);
+});
+
+test("截图前等待两帧重绘，避免选区边框残留在预览中", () => {
+  assert.match(contentSource, /requestAnimationFrame\(\(\) => window\.requestAnimationFrame\(resolve\)\)/);
+  assert.match(contentSource, /await waitForCapturePaint\(\)/);
 });
 
 test("选区边框使用 border-box 与目标图片保持同宽同高", () => {
