@@ -1,5 +1,5 @@
 (function initPromptCaptureToolbar() {
-  const VERSION = "2026-07-17-selection-border-v14";
+  const VERSION = "2026-07-17-capture-geometry-v15";
   const extensionApi = chrome;
   if (window.__promptCaptureToolbarVersion === VERSION) return;
   window.__promptCaptureToolbarVersion = VERSION;
@@ -330,6 +330,8 @@
       y: 0,
       width: Math.max(1, window.innerWidth),
       height: Math.max(1, window.innerHeight),
+      viewportWidth: Math.max(1, window.innerWidth),
+      viewportHeight: Math.max(1, window.innerHeight),
       type: "page",
       devicePixelRatio: window.devicePixelRatio || 1,
       title: document.title,
@@ -388,7 +390,18 @@
       const top = Math.min(start.y, y);
       const width = Math.abs(x - start.x);
       const height = Math.abs(y - start.y);
-      selection.rect = { x: Math.round(left), y: Math.round(top), width: Math.round(width), height: Math.round(height), type: "region", devicePixelRatio: window.devicePixelRatio || 1, title: document.title, url: location.href };
+      selection.rect = {
+        x: left,
+        y: top,
+        width,
+        height,
+        viewportWidth: Math.max(1, window.innerWidth),
+        viewportHeight: Math.max(1, window.innerHeight),
+        type: "region",
+        devicePixelRatio: window.devicePixelRatio || 1,
+        title: document.title,
+        url: location.href,
+      };
       Object.assign(box.style, { left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px` });
       size.hidden = false;
       size.textContent = `${Math.round(width)} × ${Math.round(height)}`;
@@ -509,10 +522,21 @@
     const top = clamp(rect.top, 0, window.innerHeight);
     const right = clamp(rect.right, 0, window.innerWidth);
     const bottom = clamp(rect.bottom, 0, window.innerHeight);
-    const width = Math.round(right - left);
-    const height = Math.round(bottom - top);
+    const width = right - left;
+    const height = bottom - top;
     if (width < 32 || height < 32) return null;
-    return { x: Math.round(left), y: Math.round(top), width, height, type: "image", devicePixelRatio: window.devicePixelRatio || 1, title: document.title, url: location.href };
+    return {
+      x: left,
+      y: top,
+      width,
+      height,
+      viewportWidth: Math.max(1, window.innerWidth),
+      viewportHeight: Math.max(1, window.innerHeight),
+      type: "image",
+      devicePixelRatio: window.devicePixelRatio || 1,
+      title: document.title,
+      url: location.href,
+    };
   }
 
   function setCandidate(rect) {
@@ -551,7 +575,7 @@
 
   async function captureSelectionImage(snapshot) {
     setToolbarCaptureVisibility(false);
-    await wait(80);
+    await waitForCapturePaint();
     try {
       const response = await extensionApi.runtime.sendMessage({ type: MESSAGE.CAPTURE_SELECTION, selection: snapshot });
       if (!response?.ok || !response.screenshotDataUrl) throw new Error(response?.error || "截图失败");
@@ -559,6 +583,11 @@
     } finally {
       setToolbarCaptureVisibility(true);
     }
+  }
+
+  async function waitForCapturePaint() {
+    await new Promise((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(resolve)));
+    await wait(60);
   }
 
   function setToolbarCaptureVisibility(visible) {
