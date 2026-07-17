@@ -33,6 +33,7 @@ import {
   DEFAULT_MODEL,
   DEFAULT_PROVIDER,
   MODEL_PROVIDERS,
+  PROVIDER_IDS,
   createProviderProfile,
   getProvider,
   isModelSettingsReady,
@@ -1156,7 +1157,9 @@ function SettingsState({ settings, notice, onUpdate, onTest, onClear }) {
         <FieldLabel
           required
           label="服务商"
-          hint="选择服务商后，填写对应的模型 ID、API Key 和接口地址。完成配置后点击「API Key 测试」，测试通过后即可开始采集。"
+          hint={provider.id === PROVIDER_IDS.OPENAI_COMPATIBLE
+            ? "适用于兼容 OpenAI Chat Completions 且支持图片输入的模型服务。填写模型 ID、API Key 和完整接口地址后，请完成连接测试。"
+            : "选择服务商后，填写对应的模型 ID、API Key 和接口地址。完成配置后点击「API Key 测试」，测试通过后即可开始采集。"}
         >
           <DropdownSelect
             ariaLabel="服务商"

@@ -9,8 +9,9 @@ import {
   validateModelSettings,
 } from "../src/model-providers.js";
 
-test("内置百炼、火山方舟和 OpenAI Compatible 三类服务商", () => {
+test("内置百炼、火山方舟和自定义 OpenAI 兼容服务", () => {
   assert.deepEqual(Object.keys(MODEL_PROVIDERS), ["dashscope", "volcengine", "openai-compatible"]);
+  assert.equal(getProvider("openai-compatible").label, "自定义服务（OpenAI 兼容）");
   const volcengine = getProvider("volcengine");
   assert.match(volcengine.endpoint, /ark\.cn-beijing\.volces\.com/);
   assert.equal(volcengine.defaultModelId, "doubao-seed-2-1-pro-260628");
