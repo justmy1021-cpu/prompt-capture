@@ -25,7 +25,7 @@ export const MODEL_PROVIDERS = {
   },
   [PROVIDER_IDS.OPENAI_COMPATIBLE]: {
     id: PROVIDER_IDS.OPENAI_COMPATIBLE,
-    label: "OpenAI Compatible",
+    label: "自定义服务（OpenAI 兼容）",
     endpoint: "",
     defaultModelId: "",
     models: [],

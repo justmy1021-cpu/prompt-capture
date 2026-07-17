@@ -47,7 +47,7 @@ Prompt Capture 是一款基于 Chrome Manifest V3 的视觉灵感采集扩展。
 | --- | --- |
 | 阿里云百炼 | `qwen3-vl-flash` |
 | 火山引擎方舟 | `doubao-seed-2-1-pro-260628`，也可填写 `ep-...` 推理接入点 ID |
-| OpenAI Compatible | 自行填写兼容视觉模型的模型 ID 与 Chat Completions 地址 |
+| 自定义服务（OpenAI 兼容） | 自行填写兼容 OpenAI Chat Completions 且支持图片输入的模型 ID 与接口地址 |
 
 模型必须支持图片输入。普通文本模型无法分析截图，也无法通过连接测试。
 
