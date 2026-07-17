@@ -10,6 +10,12 @@ import {
 } from "./model-providers.js";
 import { resolveCropRect } from "./capture-geometry.js";
 import {
+  ACTIVE_SESSION_KEY,
+  compactActiveSession,
+  mergeActiveSession,
+  normalizeActiveSession,
+} from "./active-session.js";
+import {
   TOOLBAR_POSITION_KEY,
   TOOLBAR_STATE_KEY,
   isToolbarSupportedUrl,
@@ -39,6 +45,7 @@ const STORAGE = {
 
 let toolbarToggleQueue = Promise.resolve();
 let toolbarReconcileQueue = Promise.resolve();
+let activeSessionWriteQueue = Promise.resolve();
 let focusedWindowId = null;
 
 chrome.action.onClicked.addListener(() => {
@@ -264,7 +271,9 @@ async function captureAndGenerate(selection, tab) {
     screenshotDataUrl = await cropScreenshot(screenshot, selection);
     return await generateAndStore({ settings, screenshotDataUrl, selection, tab });
   } catch (error) {
-    return { ok: false, error: normalizeError(error?.message || "Prompt 生成失败"), screenshotDataUrl };
+    const message = normalizeError(error?.message || "Prompt 生成失败");
+    await writeGenerationErrorSession({ screenshotDataUrl, selection, tab, error: message }).catch(() => {});
+    return { ok: false, error: message, screenshotDataUrl };
   }
 }
 
@@ -299,11 +308,21 @@ async function generateFromCapture(capture, tab) {
       tab,
     });
   } catch (error) {
-    return { ok: false, error: normalizeError(error?.message || "Prompt 生成失败"), screenshotDataUrl };
+    const message = normalizeError(error?.message || "Prompt 生成失败");
+    await writeGenerationErrorSession({ screenshotDataUrl, selection: capture, tab, error: message }).catch(() => {});
+    return { ok: false, error: message, screenshotDataUrl };
   }
 }
 
 async function generateAndStore({ settings, screenshotDataUrl, selection, tab }) {
+  const sessionCapture = createSessionCapture({ screenshotDataUrl, selection, tab });
+  await writeActiveSession({
+    phase: "generating",
+    previousPhase: "generating",
+    capture: sessionCapture,
+    record: null,
+    error: "",
+  });
   const { prompts, promptMeta } = await requestVisionModel({ settings, imageDataUrl: screenshotDataUrl });
   const createdAt = new Date().toISOString();
   const record = {
@@ -323,7 +342,59 @@ async function generateAndStore({ settings, screenshotDataUrl, selection, tab })
   const historyPayload = await chrome.storage.local.get(STORAGE.history);
   const history = Array.isArray(historyPayload[STORAGE.history]) ? historyPayload[STORAGE.history] : [];
   await chrome.storage.local.set({ [STORAGE.history]: [record, ...history.filter((item) => item.id !== record.id)] });
+  await writeActiveSession({
+    phase: "result",
+    previousPhase: "result",
+    capture: sessionCapture,
+    record,
+    error: "",
+  });
   return { ok: true, record };
+}
+
+function createSessionCapture({ screenshotDataUrl = "", selection = {}, tab = {} } = {}) {
+  return {
+    screenshotDataUrl,
+    thumbnailDataUrl: screenshotDataUrl,
+    selectionType: selection.selectionType || selection.type || "region",
+    source: {
+      title: selection.source?.title || selection.title || tab?.title || "来源网页标题",
+      url: selection.source?.url || selection.url || tab?.url || "",
+    },
+  };
+}
+
+async function writeGenerationErrorSession({ screenshotDataUrl, selection, tab, error }) {
+  const capture = createSessionCapture({ screenshotDataUrl, selection, tab });
+  return writeActiveSession({
+    phase: "error",
+    previousPhase: "error",
+    capture,
+    record: null,
+    error: String(error || "生成失败，请重试"),
+  });
+}
+
+async function readActiveSession() {
+  const stored = await chrome.storage.session.get(ACTIVE_SESSION_KEY);
+  return normalizeActiveSession(stored[ACTIVE_SESSION_KEY]);
+}
+
+async function writeActiveSession(patch) {
+  const commit = async () => {
+    const current = await readActiveSession();
+    const next = mergeActiveSession(current, patch);
+    try {
+      await chrome.storage.session.set({ [ACTIVE_SESSION_KEY]: next });
+      return next;
+    } catch {
+      const compact = compactActiveSession(next);
+      await chrome.storage.session.set({ [ACTIVE_SESSION_KEY]: compact });
+      return compact;
+    }
+  };
+  activeSessionWriteQueue = activeSessionWriteQueue.then(commit, commit);
+  return activeSessionWriteQueue;
 }
 
 function normalizeSettings(raw = {}) {
