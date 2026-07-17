@@ -1,23 +1,24 @@
 (function initPromptCaptureToolbar() {
-  const VERSION = "2026-07-17-capture-geometry-v15";
+  const VERSION = "2026-07-17-global-toolbar-v16";
   const extensionApi = chrome;
   if (window.__promptCaptureToolbarVersion === VERSION) return;
   window.__promptCaptureToolbarVersion = VERSION;
 
   const MESSAGE = {
-    TOGGLE_TOOLBAR: "prompt-capture/toggle-toolbar-v7",
-    SHOW_TOOLBAR: "prompt-capture/show-toolbar-v7",
-    START_SHORTCUT: "prompt-capture/start-shortcut-v7",
-    CAPTURE_SELECTION: "prompt-capture/capture-selection-v7",
-    CAPTURE_AND_GENERATE: "prompt-capture/capture-and-generate-v7",
-    GENERATE_FROM_CAPTURE: "prompt-capture/generate-from-capture-v7",
+    SHOW_TOOLBAR: "prompt-capture/show-toolbar-v8",
+    HIDE_TOOLBAR: "prompt-capture/hide-toolbar-v8",
+    DISABLE_TOOLBAR_GLOBALLY: "prompt-capture/disable-toolbar-globally-v8",
+    START_SHORTCUT: "prompt-capture/start-shortcut-v8",
+    CAPTURE_SELECTION: "prompt-capture/capture-selection-v8",
+    CAPTURE_AND_GENERATE: "prompt-capture/capture-and-generate-v8",
+    GENERATE_FROM_CAPTURE: "prompt-capture/generate-from-capture-v8",
     COPY_TEXT_ON_PAGE: "prompt-capture/copy-text-on-page",
   };
+  const TOOLBAR_STATE_KEY = "promptCaptureToolbarEnabled";
   const SETTINGS_KEY = "promptCaptureSettings";
   const POSITION_KEY = "promptCaptureToolbarPosition";
   let toolbarFrame = null;
   let dragHandle = null;
-  let toolbarVisible = false;
   let toolbarReady = false;
   let selection = null;
   let drag = null;
@@ -29,6 +30,7 @@
   removeStaleOverlayNodes();
   installOverlayStyles();
   window.addEventListener("resize", () => resizeToolbar(currentToolbarHeight));
+  void syncInitialToolbarVisibility();
 
   function removeStaleOverlayNodes() {
     document.querySelectorAll(".pc-toolbar-frame, .pc-toolbar-drag-handle, .pc-drag-shield, .pc-capture-layer").forEach((node) => node.remove());
@@ -36,14 +38,13 @@
 
   extensionApi.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!message?.type) return false;
-    if (message.type === MESSAGE.TOGGLE_TOOLBAR) {
-      if (toolbarVisible) hideToolbar();
-      else showToolbar();
+    if (message.type === MESSAGE.SHOW_TOOLBAR) {
+      showToolbar();
       sendResponse({ ok: true });
       return false;
     }
-    if (message.type === MESSAGE.SHOW_TOOLBAR) {
-      showToolbar();
+    if (message.type === MESSAGE.HIDE_TOOLBAR) {
+      hideToolbar();
       sendResponse({ ok: true });
       return false;
     }
@@ -66,8 +67,9 @@
     if (!toolbarFrame || event.source !== toolbarFrame.contentWindow || message?.channel !== "prompt-capture") return;
     const payload = message.payload || {};
     if (message.type === "PC_RESIZE") resizeToolbar(payload.height);
-    if (message.type === "PC_HIDE_TOOLBAR") hideToolbar();
+    if (message.type === "PC_HIDE_TOOLBAR") void disableToolbarGlobally();
     if (message.type === "PC_START_SELECTION") startSelection(payload.mode);
+    if (message.type === "PC_CANCEL_SELECTION") clearSelection();
     if (message.type === "PC_RESELECT") clearSelection();
     if (message.type === "PC_CONFIRM_SELECTION") confirmSelection();
     if (message.type === "PC_RETRY_GENERATION") retryGeneration(payload.capture);
@@ -115,7 +117,6 @@
 
   function showToolbar() {
     ensureToolbar();
-    toolbarVisible = true;
     toolbarFrame.style.display = "block";
     toolbarFrame.style.visibility = "visible";
     if (dragHandle) dragHandle.style.display = "block";
@@ -128,7 +129,24 @@
     clearSelection(true);
     if (toolbarFrame) toolbarFrame.style.display = "none";
     if (dragHandle) dragHandle.style.display = "none";
-    toolbarVisible = false;
+  }
+
+  async function syncInitialToolbarVisibility() {
+    try {
+      const stored = await extensionApi.storage.local.get(TOOLBAR_STATE_KEY);
+      if (stored[TOOLBAR_STATE_KEY] === true) showToolbar();
+    } catch {
+      // 扩展上下文失效时保持隐藏。
+    }
+  }
+
+  async function disableToolbarGlobally() {
+    try {
+      const response = await extensionApi.runtime.sendMessage({ type: MESSAGE.DISABLE_TOOLBAR_GLOBALLY });
+      if (!response?.ok) hideToolbar();
+    } catch {
+      hideToolbar();
+    }
   }
 
   function resizeToolbar(rawHeight) {

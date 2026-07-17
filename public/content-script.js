@@ -19,7 +19,6 @@
   const POSITION_KEY = "promptCaptureToolbarPosition";
   let toolbarFrame = null;
   let dragHandle = null;
-  let toolbarVisible = false;
   let toolbarReady = false;
   let selection = null;
   let drag = null;
@@ -118,7 +117,6 @@
 
   function showToolbar() {
     ensureToolbar();
-    toolbarVisible = true;
     toolbarFrame.style.display = "block";
     toolbarFrame.style.visibility = "visible";
     if (dragHandle) dragHandle.style.display = "block";
@@ -131,7 +129,6 @@
     clearSelection(true);
     if (toolbarFrame) toolbarFrame.style.display = "none";
     if (dragHandle) dragHandle.style.display = "none";
-    toolbarVisible = false;
   }
 
   async function syncInitialToolbarVisibility() {
