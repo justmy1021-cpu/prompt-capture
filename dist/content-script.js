@@ -1,20 +1,20 @@
 (function initPromptCaptureToolbar() {
-  const VERSION = "2026-07-17-global-toolbar-v16";
+  const VERSION = "2026-07-17-single-global-toolbar-v17";
   const extensionApi = chrome;
   if (window.__promptCaptureToolbarVersion === VERSION) return;
   window.__promptCaptureToolbarVersion = VERSION;
 
   const MESSAGE = {
-    SHOW_TOOLBAR: "prompt-capture/show-toolbar-v8",
-    HIDE_TOOLBAR: "prompt-capture/hide-toolbar-v8",
-    DISABLE_TOOLBAR_GLOBALLY: "prompt-capture/disable-toolbar-globally-v8",
-    START_SHORTCUT: "prompt-capture/start-shortcut-v8",
-    CAPTURE_SELECTION: "prompt-capture/capture-selection-v8",
-    CAPTURE_AND_GENERATE: "prompt-capture/capture-and-generate-v8",
-    GENERATE_FROM_CAPTURE: "prompt-capture/generate-from-capture-v8",
+    SHOW_TOOLBAR: "prompt-capture/show-toolbar-v9",
+    HIDE_TOOLBAR: "prompt-capture/hide-toolbar-v9",
+    QUERY_TOOLBAR_VISIBILITY: "prompt-capture/query-toolbar-visibility-v9",
+    DISABLE_TOOLBAR_GLOBALLY: "prompt-capture/disable-toolbar-globally-v9",
+    START_SHORTCUT: "prompt-capture/start-shortcut-v9",
+    CAPTURE_SELECTION: "prompt-capture/capture-selection-v9",
+    CAPTURE_AND_GENERATE: "prompt-capture/capture-and-generate-v9",
+    GENERATE_FROM_CAPTURE: "prompt-capture/generate-from-capture-v9",
     COPY_TEXT_ON_PAGE: "prompt-capture/copy-text-on-page",
   };
-  const TOOLBAR_STATE_KEY = "promptCaptureToolbarEnabled";
   const SETTINGS_KEY = "promptCaptureSettings";
   const POSITION_KEY = "promptCaptureToolbarPosition";
   let toolbarFrame = null;
@@ -39,7 +39,7 @@
   extensionApi.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!message?.type) return false;
     if (message.type === MESSAGE.SHOW_TOOLBAR) {
-      showToolbar();
+      showToolbar(message.position);
       sendResponse({ ok: true });
       return false;
     }
@@ -115,11 +115,13 @@
     void restoreToolbarPosition();
   }
 
-  function showToolbar() {
+  function showToolbar(position) {
     ensureToolbar();
+    applyToolbarPosition(position);
     toolbarFrame.style.display = "block";
     toolbarFrame.style.visibility = "visible";
     if (dragHandle) dragHandle.style.display = "block";
+    clampToolbarPosition();
     syncDragHandle();
     postToToolbar("PC_SHOW_TOOLBAR");
   }
@@ -133,8 +135,9 @@
 
   async function syncInitialToolbarVisibility() {
     try {
-      const stored = await extensionApi.storage.local.get(TOOLBAR_STATE_KEY);
-      if (stored[TOOLBAR_STATE_KEY] === true) showToolbar();
+      const response = await extensionApi.runtime.sendMessage({ type: MESSAGE.QUERY_TOOLBAR_VISIBILITY });
+      if (response?.visible) showToolbar(response.position);
+      else hideToolbar();
     } catch {
       // 扩展上下文失效时保持隐藏。
     }
@@ -297,16 +300,21 @@
     try {
       const stored = await extensionApi.storage.local.get(POSITION_KEY);
       const position = stored[POSITION_KEY];
-      if (!toolbarFrame?.isConnected || !Number.isFinite(position?.left) || !Number.isFinite(position?.top)) return;
-      hasCustomPosition = true;
-      toolbarFrame.style.setProperty("--pc-left", `${position.left}px`);
-      toolbarFrame.style.setProperty("--pc-top", `${position.top}px`);
-      toolbarFrame.style.setProperty("--pc-right", "auto");
+      if (!toolbarFrame?.isConnected) return;
+      applyToolbarPosition(position);
       clampToolbarPosition();
       syncDragHandle();
     } catch {
       // 存储不可用时仍允许在当前页面内拖动。
     }
+  }
+
+  function applyToolbarPosition(position) {
+    if (!toolbarFrame || !Number.isFinite(position?.left) || !Number.isFinite(position?.top)) return;
+    hasCustomPosition = true;
+    toolbarFrame.style.setProperty("--pc-left", `${position.left}px`);
+    toolbarFrame.style.setProperty("--pc-top", `${position.top}px`);
+    toolbarFrame.style.setProperty("--pc-right", "auto");
   }
 
   function clampToolbarPosition() {

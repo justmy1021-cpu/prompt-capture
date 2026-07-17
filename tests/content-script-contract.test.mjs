@@ -8,6 +8,7 @@ const contentSource = await readFile(new URL("../public/content-script.js", impo
 const routedMessages = [
   "show-toolbar",
   "hide-toolbar",
+  "query-toolbar-visibility",
   "disable-toolbar-globally",
   "start-shortcut",
   "capture-selection",
@@ -17,31 +18,31 @@ const routedMessages = [
 
 test("后台与内容脚本使用同一组升级消息通道", () => {
   for (const name of routedMessages) {
-    const channel = `prompt-capture/${name}-v8`;
+    const channel = `prompt-capture/${name}-v9`;
     assert.match(backgroundSource, new RegExp(channel));
     assert.match(contentSource, new RegExp(channel));
   }
-  assert.doesNotMatch(backgroundSource, /prompt-capture\/.+-v7/);
-  assert.doesNotMatch(contentSource, /prompt-capture\/.+-v7/);
+  assert.doesNotMatch(backgroundSource, /prompt-capture\/.+-v8/);
+  assert.doesNotMatch(contentSource, /prompt-capture\/.+-v8/);
 });
 
 test("内容脚本版本随消息通道升级，允许替换已打开页面的旧实例", () => {
-  assert.match(contentSource, /const VERSION = "2026-07-17-global-toolbar-v16"/);
+  assert.match(contentSource, /const VERSION = "2026-07-17-single-global-toolbar-v17"/);
   assert.match(backgroundSource, /tabs that predate an update/);
   assert.match(backgroundSource, /chrome\.scripting\.executeScript/);
 });
 
-test("后台持久化全局状态后向全部支持网页广播", () => {
+test("后台持久化全局状态后只显示唯一目标网页", () => {
   assert.match(backgroundSource, /TOOLBAR_STATE_KEY/);
   assert.match(backgroundSource, /chrome\.storage\.local\.set\(\{ \[TOOLBAR_STATE_KEY\]: enabled \}\)/);
   assert.match(backgroundSource, /chrome\.tabs\.query\(\{\}\)/);
   assert.match(backgroundSource, /Promise\.allSettled/);
-  assert.match(backgroundSource, /enabled \? MESSAGE\.SHOW_TOOLBAR : MESSAGE\.HIDE_TOOLBAR/);
+  assert.match(backgroundSource, /resolveToolbarTargetTabId/);
 });
 
-test("内容脚本启动时恢复全局显示状态并支持明确隐藏", () => {
-  assert.match(contentSource, /const TOOLBAR_STATE_KEY = "promptCaptureToolbarEnabled"/);
+test("内容脚本启动时查询唯一显示资格并支持明确隐藏", () => {
   assert.match(contentSource, /syncInitialToolbarVisibility\(\)/);
+  assert.match(contentSource, /MESSAGE\.QUERY_TOOLBAR_VISIBILITY/);
   assert.match(contentSource, /message\.type === MESSAGE\.HIDE_TOOLBAR/);
   assert.match(contentSource, /hideToolbar\(\)/);
 });
