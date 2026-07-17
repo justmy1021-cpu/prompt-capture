@@ -285,8 +285,18 @@ export function App() {
     navigationTimersRef.current.push(swapTimer);
   };
 
+  const cancelPendingSelection = () => {
+    setCandidate(null);
+    setSelectionMode("");
+    setRetryCapture(null);
+    setErrorMessage("");
+    setSelectionHint("");
+    postToHost("PC_CANCEL_SELECTION");
+  };
+
   const openScreen = (next) => {
     if (next === screen) return;
+    cancelPendingSelection();
     setPreviousScreen(screen);
     transitionToScreen(next, "forward");
   };

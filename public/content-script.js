@@ -70,6 +70,7 @@
     if (message.type === "PC_RESIZE") resizeToolbar(payload.height);
     if (message.type === "PC_HIDE_TOOLBAR") void disableToolbarGlobally();
     if (message.type === "PC_START_SELECTION") startSelection(payload.mode);
+    if (message.type === "PC_CANCEL_SELECTION") clearSelection();
     if (message.type === "PC_RESELECT") clearSelection();
     if (message.type === "PC_CONFIRM_SELECTION") confirmSelection();
     if (message.type === "PC_RETRY_GENERATION") retryGeneration(payload.capture);
