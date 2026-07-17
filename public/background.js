@@ -9,14 +9,20 @@ import {
   validateModelSettings,
 } from "./model-providers.js";
 import { resolveCropRect } from "./capture-geometry.js";
+import {
+  TOOLBAR_STATE_KEY,
+  isToolbarSupportedUrl,
+  nextToolbarEnabled,
+} from "./toolbar-state.js";
 
 const MESSAGE = {
-  TOGGLE_TOOLBAR: "prompt-capture/toggle-toolbar-v7",
-  SHOW_TOOLBAR: "prompt-capture/show-toolbar-v7",
-  START_SHORTCUT: "prompt-capture/start-shortcut-v7",
-  CAPTURE_SELECTION: "prompt-capture/capture-selection-v7",
-  CAPTURE_AND_GENERATE: "prompt-capture/capture-and-generate-v7",
-  GENERATE_FROM_CAPTURE: "prompt-capture/generate-from-capture-v7",
+  SHOW_TOOLBAR: "prompt-capture/show-toolbar-v8",
+  HIDE_TOOLBAR: "prompt-capture/hide-toolbar-v8",
+  DISABLE_TOOLBAR_GLOBALLY: "prompt-capture/disable-toolbar-globally-v8",
+  START_SHORTCUT: "prompt-capture/start-shortcut-v8",
+  CAPTURE_SELECTION: "prompt-capture/capture-selection-v8",
+  CAPTURE_AND_GENERATE: "prompt-capture/capture-and-generate-v8",
+  GENERATE_FROM_CAPTURE: "prompt-capture/generate-from-capture-v8",
   TEST_MODEL: "prompt-capture/test-model",
   COPY_TEXT: "prompt-capture/copy-text",
   OFFSCREEN_COPY_TEXT: "prompt-capture/offscreen-copy-text",
@@ -28,9 +34,10 @@ const STORAGE = {
   settings: "promptCaptureSettings",
 };
 
-chrome.action.onClicked.addListener((tab) => {
-  if (!tab?.id) return;
-  toggleToolbar(tab).catch(() => {});
+let toolbarToggleQueue = Promise.resolve();
+
+chrome.action.onClicked.addListener(() => {
+  toolbarToggleQueue = toolbarToggleQueue.then(toggleToolbarGlobally, toggleToolbarGlobally);
 });
 
 chrome.commands.onCommand.addListener((command) => {
@@ -42,6 +49,11 @@ chrome.commands.onCommand.addListener((command) => {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message?.type) return false;
+
+  if (message.type === MESSAGE.DISABLE_TOOLBAR_GLOBALLY) {
+    setToolbarEnabled(false).then(sendResponse);
+    return true;
+  }
 
   if (message.type === MESSAGE.CAPTURE_AND_GENERATE) {
     captureAndGenerate(message.selection, sender.tab).then(sendResponse);
@@ -71,13 +83,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return false;
 });
 
-async function toggleToolbar(tab) {
-  if (!canRunOnTab(tab)) return { ok: false, error: "当前页面暂不支持采集" };
-  return sendToContent(tab.id, { type: MESSAGE.TOGGLE_TOOLBAR });
+async function toggleToolbarGlobally() {
+  const stored = await chrome.storage.local.get(TOOLBAR_STATE_KEY);
+  return setToolbarEnabled(nextToolbarEnabled(stored[TOOLBAR_STATE_KEY]));
+}
+
+async function setToolbarEnabled(enabled) {
+  await chrome.storage.local.set({ [TOOLBAR_STATE_KEY]: enabled });
+  const tabs = await chrome.tabs.query({});
+  const type = enabled ? MESSAGE.SHOW_TOOLBAR : MESSAGE.HIDE_TOOLBAR;
+  await Promise.allSettled(
+    tabs
+      .filter((tab) => tab?.id && isToolbarSupportedUrl(tab.url))
+      .map((tab) => sendToContent(tab.id, { type })),
+  );
+  return { ok: true, enabled };
 }
 
 async function startShortcut(tab) {
-  if (!canRunOnTab(tab)) return { ok: false, error: "当前页面暂不支持采集" };
+  if (!isToolbarSupportedUrl(tab?.url)) return { ok: false, error: "当前页面暂不支持采集" };
   return sendToContent(tab.id, { type: MESSAGE.START_SHORTCUT });
 }
 
@@ -96,10 +120,6 @@ async function sendToContent(tabId, message) {
   } catch (error) {
     return { ok: false, error: error?.message || "TOOLBAR_INJECTION_FAILED" };
   }
-}
-
-function canRunOnTab(tab) {
-  return Boolean(tab?.url && /^(https?|file):\/\//.test(tab.url));
 }
 
 async function copyText(value, tab) {
