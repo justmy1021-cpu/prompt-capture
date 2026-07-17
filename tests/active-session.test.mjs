@@ -5,6 +5,8 @@ import {
   ACTIVE_SESSION_KEY,
   DEFAULT_ACTIVE_SESSION,
   compactActiveSession,
+  createGenerationId,
+  isActiveGeneration,
   mergeActiveSession,
   normalizeActiveSession,
 } from "../src/active-session.js";
@@ -12,6 +14,7 @@ import {
 test("分析会话只接受约定页面与 Prompt 类型", () => {
   assert.equal(ACTIVE_SESSION_KEY, "promptCaptureActiveSession");
   assert.equal(DEFAULT_ACTIVE_SESSION.phase, "idle");
+  assert.equal(DEFAULT_ACTIVE_SESSION.generationId, "");
   assert.equal(normalizeActiveSession({ phase: "unknown" }).phase, "idle");
   assert.equal(normalizeActiveSession({ activePrompt: "unknown" }).activePrompt, "image");
 
@@ -21,12 +24,22 @@ test("分析会话只接受约定页面与 Prompt 类型", () => {
     activePrompt: "style",
     error: "连接失败",
     updatedAt: 88,
+    generationId: "generation-88",
   });
   assert.equal(session.phase, "settings");
   assert.equal(session.previousPhase, "result");
   assert.equal(session.activePrompt, "style");
   assert.equal(session.error, "连接失败");
   assert.equal(session.updatedAt, 88);
+  assert.equal(session.generationId, "generation-88");
+  assert.equal(normalizeActiveSession({ generationId: 123 }).generationId, "");
+});
+
+test("生成任务 ID 可区分乱序返回的分析任务", () => {
+  assert.equal(createGenerationId(100, 0.25), "100-250000000");
+  assert.equal(isActiveGeneration({ generationId: "generation-new" }, "generation-new"), true);
+  assert.equal(isActiveGeneration({ generationId: "generation-new" }, "generation-old"), false);
+  assert.equal(isActiveGeneration({}, ""), false);
 });
 
 test("会话合并使用显式时间并保留已有数据", () => {

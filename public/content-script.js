@@ -1,5 +1,5 @@
 (function initPromptCaptureToolbar() {
-  const VERSION = "2026-07-17-single-global-toolbar-v17";
+  const VERSION = "2026-07-17-session-race-v18";
   const extensionApi = chrome;
   if (window.__promptCaptureToolbarVersion === VERSION) return;
   window.__promptCaptureToolbarVersion = VERSION;
@@ -8,6 +8,7 @@
     SHOW_TOOLBAR: "prompt-capture/show-toolbar-v9",
     HIDE_TOOLBAR: "prompt-capture/hide-toolbar-v9",
     QUERY_TOOLBAR_VISIBILITY: "prompt-capture/query-toolbar-visibility-v9",
+    SYNC_ACTIVE_SESSION: "prompt-capture/sync-active-session-v9",
     DISABLE_TOOLBAR_GLOBALLY: "prompt-capture/disable-toolbar-globally-v9",
     START_SHORTCUT: "prompt-capture/start-shortcut-v9",
     CAPTURE_SELECTION: "prompt-capture/capture-selection-v9",
@@ -26,6 +27,7 @@
   let currentToolbarHeight = 100;
   let hasCustomPosition = false;
   let shadowRestoreTimer = null;
+  let latestActiveSession = null;
 
   removeStaleOverlayNodes();
   installOverlayStyles();
@@ -39,7 +41,12 @@
   extensionApi.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!message?.type) return false;
     if (message.type === MESSAGE.SHOW_TOOLBAR) {
-      showToolbar(message.position);
+      showToolbar(message.position, message.session);
+      sendResponse({ ok: true });
+      return false;
+    }
+    if (message.type === MESSAGE.SYNC_ACTIVE_SESSION) {
+      syncActiveSession(message.session);
       sendResponse({ ok: true });
       return false;
     }
@@ -98,7 +105,7 @@
     toolbarFrame.style.display = "none";
     toolbarFrame.addEventListener("load", () => {
       toolbarReady = true;
-      postToToolbar("PC_SHOW_TOOLBAR");
+      postToToolbar("PC_SHOW_TOOLBAR", { session: latestActiveSession });
       syncDragHandle();
     });
     document.documentElement.appendChild(toolbarFrame);
@@ -115,7 +122,8 @@
     void restoreToolbarPosition();
   }
 
-  function showToolbar(position) {
+  function showToolbar(position, session) {
+    if (session && typeof session === "object") latestActiveSession = session;
     ensureToolbar();
     applyToolbarPosition(position);
     toolbarFrame.style.display = "block";
@@ -123,7 +131,13 @@
     if (dragHandle) dragHandle.style.display = "block";
     clampToolbarPosition();
     syncDragHandle();
-    postToToolbar("PC_SHOW_TOOLBAR");
+    postToToolbar("PC_SHOW_TOOLBAR", { session: latestActiveSession });
+  }
+
+  function syncActiveSession(session) {
+    if (!session || typeof session !== "object") return;
+    latestActiveSession = session;
+    postToToolbar("PC_ACTIVE_SESSION", { session });
   }
 
   function hideToolbar() {
@@ -136,7 +150,7 @@
   async function syncInitialToolbarVisibility() {
     try {
       const response = await extensionApi.runtime.sendMessage({ type: MESSAGE.QUERY_TOOLBAR_VISIBILITY });
-      if (response?.visible) showToolbar(response.position);
+      if (response?.visible) showToolbar(response.position, response.session);
       else hideToolbar();
     } catch {
       // 扩展上下文失效时保持隐藏。
@@ -590,10 +604,22 @@
       };
       postToToolbar("PC_CAPTURE_READY", { capture });
       const response = await extensionApi.runtime.sendMessage({ type: MESSAGE.GENERATE_FROM_CAPTURE, capture });
-      if (!response?.ok) throw Object.assign(new Error(response?.error || "生成失败"), { screenshotDataUrl: response?.screenshotDataUrl || screenshotDataUrl });
-      postToToolbar("PC_GENERATION_SUCCESS", { record: response.record });
+      if (response?.stale) {
+        syncActiveSession(response.session);
+        return;
+      }
+      if (!response?.ok) throw Object.assign(new Error(response?.error || "生成失败"), {
+        screenshotDataUrl: response?.screenshotDataUrl || screenshotDataUrl,
+        session: response?.session || null,
+      });
+      postToToolbar("PC_GENERATION_SUCCESS", { record: response.record, session: response.session });
     } catch (error) {
-      postToToolbar("PC_GENERATION_ERROR", { error: error?.message || "生成失败", screenshotDataUrl: error?.screenshotDataUrl || screenshotDataUrl, selection: snapshot });
+      postToToolbar("PC_GENERATION_ERROR", {
+        error: error?.message || "生成失败",
+        screenshotDataUrl: error?.screenshotDataUrl || screenshotDataUrl,
+        selection: snapshot,
+        session: error?.session || null,
+      });
     } finally {
       selection = null;
     }
@@ -630,8 +656,15 @@
     }
     try {
       const response = await extensionApi.runtime.sendMessage({ type: MESSAGE.GENERATE_FROM_CAPTURE, capture });
-      if (!response?.ok) throw Object.assign(new Error(response?.error || "生成失败"), { screenshotDataUrl: response?.screenshotDataUrl || capture.screenshotDataUrl });
-      postToToolbar("PC_GENERATION_SUCCESS", { record: response.record });
+      if (response?.stale) {
+        syncActiveSession(response.session);
+        return;
+      }
+      if (!response?.ok) throw Object.assign(new Error(response?.error || "生成失败"), {
+        screenshotDataUrl: response?.screenshotDataUrl || capture.screenshotDataUrl,
+        session: response?.session || null,
+      });
+      postToToolbar("PC_GENERATION_SUCCESS", { record: response.record, session: response.session });
     } catch (error) {
       postToToolbar("PC_GENERATION_ERROR", {
         error: error?.message || "生成失败",
@@ -641,6 +674,7 @@
           title: capture.source?.title || document.title,
           url: capture.source?.url || location.href,
         },
+        session: error?.session || null,
       });
     }
   }

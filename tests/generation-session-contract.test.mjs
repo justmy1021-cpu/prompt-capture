@@ -7,7 +7,7 @@ const backgroundSource = await readFile(new URL("../public/background.js", impor
 test("后台使用 session 存储维护唯一分析会话并支持截图过大降级", () => {
   assert.match(backgroundSource, /from "\.\/active-session\.js"/);
   assert.match(backgroundSource, /async function readActiveSession\(\)/);
-  assert.match(backgroundSource, /async function writeActiveSession\(patch\)/);
+  assert.match(backgroundSource, /async function writeActiveSession\(patch, expectedGenerationId/);
   assert.match(backgroundSource, /chrome\.storage\.session\.get\(ACTIVE_SESSION_KEY\)/);
   assert.match(backgroundSource, /chrome\.storage\.session\.set\(\{ \[ACTIVE_SESSION_KEY\]: next \}\)/);
   assert.match(backgroundSource, /compactActiveSession\(next\)/);

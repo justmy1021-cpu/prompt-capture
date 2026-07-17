@@ -12,6 +12,8 @@ import { resolveCropRect } from "./capture-geometry.js";
 import {
   ACTIVE_SESSION_KEY,
   compactActiveSession,
+  createGenerationId,
+  isActiveGeneration,
   mergeActiveSession,
   normalizeActiveSession,
 } from "./active-session.js";
@@ -27,11 +29,14 @@ const MESSAGE = {
   SHOW_TOOLBAR: "prompt-capture/show-toolbar-v9",
   HIDE_TOOLBAR: "prompt-capture/hide-toolbar-v9",
   QUERY_TOOLBAR_VISIBILITY: "prompt-capture/query-toolbar-visibility-v9",
+  SYNC_ACTIVE_SESSION: "prompt-capture/sync-active-session-v9",
   DISABLE_TOOLBAR_GLOBALLY: "prompt-capture/disable-toolbar-globally-v9",
   START_SHORTCUT: "prompt-capture/start-shortcut-v9",
   CAPTURE_SELECTION: "prompt-capture/capture-selection-v9",
   CAPTURE_AND_GENERATE: "prompt-capture/capture-and-generate-v9",
   GENERATE_FROM_CAPTURE: "prompt-capture/generate-from-capture-v9",
+  GET_ACTIVE_SESSION: "prompt-capture/get-active-session-v1",
+  UPDATE_ACTIVE_SESSION: "prompt-capture/update-active-session-v1",
   TEST_MODEL: "prompt-capture/test-model",
   COPY_TEXT: "prompt-capture/copy-text",
   OFFSCREEN_COPY_TEXT: "prompt-capture/offscreen-copy-text",
@@ -46,6 +51,7 @@ const STORAGE = {
 let toolbarToggleQueue = Promise.resolve();
 let toolbarReconcileQueue = Promise.resolve();
 let activeSessionWriteQueue = Promise.resolve();
+let historyWriteQueue = Promise.resolve();
 let focusedWindowId = null;
 
 chrome.action.onClicked.addListener(() => {
@@ -84,6 +90,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === MESSAGE.QUERY_TOOLBAR_VISIBILITY) {
     getToolbarVisibilityForTab(sender.tab).then(sendResponse);
+    return true;
+  }
+
+  if (message.type === MESSAGE.GET_ACTIVE_SESSION) {
+    readActiveSession().then(
+      (session) => sendResponse({ ok: true, session }),
+      (error) => sendResponse({ ok: false, error: error?.message || "会话读取失败" }),
+    );
+    return true;
+  }
+
+  if (message.type === MESSAGE.UPDATE_ACTIVE_SESSION) {
+    writeActiveSession(message.patch, message.expectedGenerationId).then(
+      (result) => sendResponse({ ok: true, session: result.session, applied: result.applied }),
+      (error) => sendResponse({ ok: false, error: error?.message || "会话更新失败" }),
+    );
     return true;
   }
 
@@ -156,10 +178,11 @@ async function getFocusedWindowId() {
 }
 
 async function readToolbarSnapshot() {
-  const [stored, tabs, focusedWindowId] = await Promise.all([
+  const [stored, tabs, focusedWindowId, session] = await Promise.all([
     chrome.storage.local.get([TOOLBAR_STATE_KEY, TOOLBAR_POSITION_KEY]),
     chrome.tabs.query({}),
     getFocusedWindowId(),
+    readActiveSession(),
   ]);
   const enabled = stored[TOOLBAR_STATE_KEY] === true;
   const targetTabId = enabled ? resolveToolbarTargetTabId(tabs, focusedWindowId) : null;
@@ -168,27 +191,29 @@ async function readToolbarSnapshot() {
     tabs,
     targetTabId,
     position: stored[TOOLBAR_POSITION_KEY] || null,
+    session,
   };
 }
 
 async function getToolbarVisibilityForTab(tab) {
-  const { enabled, targetTabId, position } = await readToolbarSnapshot();
+  const { enabled, targetTabId, position, session } = await readToolbarSnapshot();
   return {
     ok: true,
     enabled,
     visible: enabled && tab?.id === targetTabId,
     position,
+    session,
   };
 }
 
 async function reconcileToolbarVisibility() {
-  const { tabs, targetTabId, position } = await readToolbarSnapshot();
+  const { tabs, targetTabId, position, session } = await readToolbarSnapshot();
   await Promise.allSettled(
     tabs
       .filter((tab) => Number.isInteger(tab?.id) && isToolbarSupportedUrl(tab.url))
       .map((tab) => {
         const type = tab.id === targetTabId ? MESSAGE.SHOW_TOOLBAR : MESSAGE.HIDE_TOOLBAR;
-        return sendToContent(tab.id, type === MESSAGE.SHOW_TOOLBAR ? { type, position } : { type });
+        return sendToContent(tab.id, type === MESSAGE.SHOW_TOOLBAR ? { type, position, session } : { type });
       }),
   );
   return { ok: true, targetTabId };
@@ -315,41 +340,68 @@ async function generateFromCapture(capture, tab) {
 }
 
 async function generateAndStore({ settings, screenshotDataUrl, selection, tab }) {
+  const generationId = createGenerationId();
   const sessionCapture = createSessionCapture({ screenshotDataUrl, selection, tab });
-  await writeActiveSession({
-    phase: "generating",
-    previousPhase: "generating",
-    capture: sessionCapture,
-    record: null,
-    error: "",
-  });
-  const { prompts, promptMeta } = await requestVisionModel({ settings, imageDataUrl: screenshotDataUrl });
-  const createdAt = new Date().toISOString();
-  const record = {
-    id: `capture-${Date.now()}`,
-    createdAt,
-    time: formatTime(createdAt),
-    selectionType: selection.type || "region",
-    screenshotDataUrl,
-    thumbnailDataUrl: screenshotDataUrl,
-    source: { title: selection.title || tab?.title || "来源网页标题", url: selection.url || tab?.url || "" },
-    language: settings.language,
-    provider: settings.provider,
-    modelId: settings.modelId,
-    prompts,
-    promptMeta,
+  let generationStarted = false;
+  try {
+    await writeActiveSession({
+      phase: "generating",
+      previousPhase: "generating",
+      capture: sessionCapture,
+      record: null,
+      error: "",
+      generationId,
+    });
+    generationStarted = true;
+    const { prompts, promptMeta } = await requestVisionModel({ settings, imageDataUrl: screenshotDataUrl });
+    const createdAt = new Date().toISOString();
+    const record = {
+      id: `capture-${generationId}`,
+      createdAt,
+      time: formatTime(createdAt),
+      selectionType: selection.type || "region",
+      screenshotDataUrl,
+      thumbnailDataUrl: screenshotDataUrl,
+      source: { title: selection.title || tab?.title || "来源网页标题", url: selection.url || tab?.url || "" },
+      language: settings.language,
+      provider: settings.provider,
+      modelId: settings.modelId,
+      prompts,
+      promptMeta,
+    };
+    await prependHistoryRecord(record);
+    const resultUpdate = await writeActiveSession({
+      phase: "result",
+      previousPhase: "result",
+      capture: sessionCapture,
+      record,
+      error: "",
+      generationId,
+    }, generationId);
+    return { ok: true, record, stale: !resultUpdate.applied, session: resultUpdate.session };
+  } catch (error) {
+    const message = normalizeError(error?.message || "Prompt 生成失败");
+    const errorUpdate = generationStarted
+      ? await writeGenerationErrorSession({ screenshotDataUrl, selection, tab, error: message, generationId }).catch(() => null)
+      : null;
+    return {
+      ok: false,
+      error: message,
+      screenshotDataUrl,
+      stale: errorUpdate ? !errorUpdate.applied : false,
+      session: errorUpdate?.session || null,
+    };
+  }
+}
+
+function prependHistoryRecord(record) {
+  const commit = async () => {
+    const historyPayload = await chrome.storage.local.get(STORAGE.history);
+    const history = Array.isArray(historyPayload[STORAGE.history]) ? historyPayload[STORAGE.history] : [];
+    await chrome.storage.local.set({ [STORAGE.history]: [record, ...history.filter((item) => item.id !== record.id)] });
   };
-  const historyPayload = await chrome.storage.local.get(STORAGE.history);
-  const history = Array.isArray(historyPayload[STORAGE.history]) ? historyPayload[STORAGE.history] : [];
-  await chrome.storage.local.set({ [STORAGE.history]: [record, ...history.filter((item) => item.id !== record.id)] });
-  await writeActiveSession({
-    phase: "result",
-    previousPhase: "result",
-    capture: sessionCapture,
-    record,
-    error: "",
-  });
-  return { ok: true, record };
+  historyWriteQueue = historyWriteQueue.then(commit, commit);
+  return historyWriteQueue;
 }
 
 function createSessionCapture({ screenshotDataUrl = "", selection = {}, tab = {} } = {}) {
@@ -364,7 +416,7 @@ function createSessionCapture({ screenshotDataUrl = "", selection = {}, tab = {}
   };
 }
 
-async function writeGenerationErrorSession({ screenshotDataUrl, selection, tab, error }) {
+async function writeGenerationErrorSession({ screenshotDataUrl, selection, tab, error, generationId }) {
   const capture = createSessionCapture({ screenshotDataUrl, selection, tab });
   return writeActiveSession({
     phase: "error",
@@ -372,7 +424,8 @@ async function writeGenerationErrorSession({ screenshotDataUrl, selection, tab, 
     capture,
     record: null,
     error: String(error || "生成失败，请重试"),
-  });
+    generationId,
+  }, generationId);
 }
 
 async function readActiveSession() {
@@ -380,21 +433,38 @@ async function readActiveSession() {
   return normalizeActiveSession(stored[ACTIVE_SESSION_KEY]);
 }
 
-async function writeActiveSession(patch) {
+async function writeActiveSession(patch, expectedGenerationId = null) {
   const commit = async () => {
     const current = await readActiveSession();
+    if (expectedGenerationId && !isActiveGeneration(current, expectedGenerationId)) {
+      return { session: current, applied: false };
+    }
     const next = mergeActiveSession(current, patch);
     try {
       await chrome.storage.session.set({ [ACTIVE_SESSION_KEY]: next });
-      return next;
+      await broadcastActiveSession(next);
+      return { session: next, applied: true };
     } catch {
       const compact = compactActiveSession(next);
       await chrome.storage.session.set({ [ACTIVE_SESSION_KEY]: compact });
-      return compact;
+      await broadcastActiveSession(compact);
+      return { session: compact, applied: true };
     }
   };
   activeSessionWriteQueue = activeSessionWriteQueue.then(commit, commit);
   return activeSessionWriteQueue;
+}
+
+async function broadcastActiveSession(session) {
+  const [stored, tabs, currentFocusedWindowId] = await Promise.all([
+    chrome.storage.local.get(TOOLBAR_STATE_KEY),
+    chrome.tabs.query({}),
+    getFocusedWindowId(),
+  ]);
+  if (stored[TOOLBAR_STATE_KEY] !== true) return;
+  const targetTabId = resolveToolbarTargetTabId(tabs, currentFocusedWindowId);
+  if (targetTabId == null) return;
+  await sendToContent(targetTabId, { type: MESSAGE.SYNC_ACTIVE_SESSION, session });
 }
 
 function normalizeSettings(raw = {}) {

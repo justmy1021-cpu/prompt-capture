@@ -23,8 +23,8 @@ test("后台只向目标页显示并向其他普通网页隐藏", () => {
 });
 
 test("内容脚本显示前应用后台返回的全局位置", () => {
-  assert.match(contentSource, /showToolbar\(message\.position\)/);
-  assert.match(contentSource, /showToolbar\(response\.position\)/);
+  assert.match(contentSource, /showToolbar\(message\.position, message\.session\)/);
+  assert.match(contentSource, /showToolbar\(response\.position, response\.session\)/);
   assert.match(contentSource, /function applyToolbarPosition\(position\)/);
   assert.match(contentSource, /applyToolbarPosition\(position\);[\s\S]*?style\.display = "block"/);
 });

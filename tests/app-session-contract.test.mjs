@@ -7,7 +7,7 @@ const appSource = await readFile(new URL("../src/App.jsx", import.meta.url), "ut
 test("工具栏读取、合并并监听 Chrome 运行期共享会话", () => {
   assert.match(appSource, /from "\.\/active-session\.js"/);
   assert.match(appSource, /async function readActiveSession\(\)/);
-  assert.match(appSource, /async function saveActiveSessionPatch\(patch\)/);
+  assert.match(appSource, /async function saveActiveSessionPatch\(patch, expectedGenerationId/);
   assert.match(appSource, /storage\.session\.get\(ACTIVE_SESSION_KEY\)/);
   assert.match(appSource, /mergeActiveSession\(current, patch\)/);
   assert.match(appSource, /storage\.session\.set\(\{ \[ACTIVE_SESSION_KEY\]: next \}\)/);

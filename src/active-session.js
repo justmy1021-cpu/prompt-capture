@@ -10,6 +10,7 @@ export const DEFAULT_ACTIVE_SESSION = Object.freeze({
   capture: null,
   record: null,
   error: "",
+  generationId: "",
   updatedAt: 0,
 });
 
@@ -26,8 +27,17 @@ export function normalizeActiveSession(raw = {}) {
     capture: objectOrNull(value.capture),
     record: objectOrNull(value.record),
     error: typeof value.error === "string" ? value.error : "",
+    generationId: typeof value.generationId === "string" ? value.generationId : "",
     updatedAt: Number.isFinite(value.updatedAt) ? value.updatedAt : 0,
   };
+}
+
+export function createGenerationId(now = Date.now(), random = Math.random()) {
+  return `${Math.trunc(now)}-${Math.trunc(random * 1_000_000_000)}`;
+}
+
+export function isActiveGeneration(session, generationId) {
+  return Boolean(generationId) && normalizeActiveSession(session).generationId === generationId;
 }
 
 export function mergeActiveSession(current = {}, patch = {}, updatedAt = Date.now()) {

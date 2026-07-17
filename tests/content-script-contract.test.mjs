@@ -9,6 +9,7 @@ const routedMessages = [
   "show-toolbar",
   "hide-toolbar",
   "query-toolbar-visibility",
+  "sync-active-session",
   "disable-toolbar-globally",
   "start-shortcut",
   "capture-selection",
@@ -27,7 +28,7 @@ test("后台与内容脚本使用同一组升级消息通道", () => {
 });
 
 test("内容脚本版本随消息通道升级，允许替换已打开页面的旧实例", () => {
-  assert.match(contentSource, /const VERSION = "2026-07-17-single-global-toolbar-v17"/);
+  assert.match(contentSource, /const VERSION = "2026-07-17-session-race-v18"/);
   assert.match(backgroundSource, /tabs that predate an update/);
   assert.match(backgroundSource, /chrome\.scripting\.executeScript/);
 });
