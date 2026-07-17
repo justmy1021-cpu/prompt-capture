@@ -40,10 +40,22 @@ import {
   normalizeModelSettings,
   validateModelSettings,
 } from "./model-providers.js";
+import {
+  ACTIVE_SESSION_KEY,
+  DEFAULT_ACTIVE_SESSION,
+  createGenerationId,
+  mergeActiveSession,
+  normalizeActiveSession,
+} from "./active-session.js";
 
 const STORAGE = {
   history: "promptCaptureHistory",
   settings: "promptCaptureSettings",
+};
+
+const SESSION_MESSAGE = {
+  GET: "prompt-capture/get-active-session-v1",
+  UPDATE: "prompt-capture/update-active-session-v1",
 };
 
 const NAVIGATION_EXIT_MS = 160;
@@ -144,6 +156,40 @@ async function readStoredData() {
   return extension.storage.local.get([STORAGE.history, STORAGE.settings]);
 }
 
+async function readActiveSession() {
+  const extension = getExtensionRuntime();
+  if (extension?.runtime?.sendMessage) {
+    try {
+      const response = await extension.runtime.sendMessage({ type: SESSION_MESSAGE.GET });
+      if (response?.ok) return normalizeActiveSession(response.session);
+    } catch {
+      // 后台刚重启时回退到 session 存储直读。
+    }
+  }
+  if (!extension?.storage?.session) return DEFAULT_ACTIVE_SESSION;
+  const stored = await extension.storage.session.get(ACTIVE_SESSION_KEY);
+  return normalizeActiveSession(stored[ACTIVE_SESSION_KEY]);
+}
+
+async function saveActiveSessionPatch(patch, expectedGenerationId = null) {
+  const extension = getExtensionRuntime();
+  if (extension?.runtime?.sendMessage) {
+    try {
+      const response = await extension.runtime.sendMessage({ type: SESSION_MESSAGE.UPDATE, patch, expectedGenerationId });
+      if (response?.ok) return normalizeActiveSession(response.session);
+    } catch {
+      // 后台暂不可用时继续使用 session 存储兼容路径。
+    }
+  }
+  if (!extension?.storage?.session) return normalizeActiveSession(patch);
+  const stored = await extension.storage.session.get(ACTIVE_SESSION_KEY);
+  const current = normalizeActiveSession(stored[ACTIVE_SESSION_KEY]);
+  if (expectedGenerationId && current.generationId !== expectedGenerationId) return current;
+  const next = mergeActiveSession(current, patch);
+  await extension.storage.session.set({ [ACTIVE_SESSION_KEY]: next });
+  return next;
+}
+
 async function saveSettings(settings) {
   const extension = getExtensionRuntime();
   if (extension?.storage?.local) {
@@ -216,11 +262,13 @@ export function App() {
   const [selectionHint, setSelectionHint] = useState("");
   const [generationImageHeight, setGenerationImageHeight] = useState(224);
   const [showClearDialog, setShowClearDialog] = useState(false);
-  const returnScreenRef = useRef("idle");
   const clearHistoryTriggerRef = useRef(null);
   const noticeTimerRef = useRef(null);
   const navigationTimersRef = useRef([]);
   const currentScreenRef = useRef(screen);
+  const latestSessionRef = useRef(DEFAULT_ACTIVE_SESSION);
+  const latestSessionUpdatedAtRef = useRef(0);
+  const pendingGenerationIdRef = useRef("");
 
   const configured = isSettingsComplete(settings);
   const visibleHistory = useMemo(() => {
@@ -285,10 +333,69 @@ export function App() {
     navigationTimersRef.current.push(swapTimer);
   };
 
+  const cancelPendingSelection = () => {
+    setCandidate(null);
+    setSelectionMode("");
+    setRetryCapture(null);
+    setErrorMessage("");
+    setSelectionHint("");
+    postToHost("PC_CANCEL_SELECTION");
+  };
+
+  const applyActiveSession = (raw) => {
+    const session = normalizeActiveSession(raw);
+    if (session.updatedAt < latestSessionUpdatedAtRef.current) return;
+    latestSessionUpdatedAtRef.current = session.updatedAt;
+    latestSessionRef.current = session;
+    setActivePrompt(session.activePrompt);
+    if (session.record || session.capture) setCapture(session.record || session.capture);
+
+    if (session.phase === "generating") {
+      setCandidate(null);
+      setSelectionMode("");
+      setRetryCapture(null);
+      setErrorMessage("");
+      setGenerationImageHeight(224);
+      setScreen("generating");
+    } else if (session.phase === "result") {
+      setCandidate(null);
+      setSelectionMode("");
+      setRetryCapture(null);
+      setErrorMessage("");
+      setScreen("result");
+    } else if (session.phase === "error") {
+      setCandidate(null);
+      setSelectionMode("");
+      setRetryCapture(session.capture);
+      setErrorMessage(session.error || "生成失败，请重试");
+      setScreen("error");
+    } else if (session.phase === "history") {
+      setPreviousScreen(session.previousPhase);
+      setScreen("history");
+    } else if (session.phase === "settings") {
+      setPreviousScreen(session.previousPhase);
+      setScreen("settings");
+    } else if (session.phase === "required") {
+      setScreen("required");
+    } else {
+      setScreen("idle");
+    }
+  };
+
+  const refreshActiveSession = () => {
+    void readActiveSession().then(applyActiveSession).catch(() => {});
+  };
+
   const openScreen = (next) => {
     if (next === screen) return;
-    setPreviousScreen(screen);
+    cancelPendingSelection();
+    const sharedPhase = latestSessionRef.current.phase;
+    const previousPhase = sharedPhase === "history" || sharedPhase === "settings"
+      ? latestSessionRef.current.previousPhase
+      : sharedPhase === "idle" && screen !== "idle" ? screen : sharedPhase;
+    setPreviousScreen(previousPhase);
     transitionToScreen(next, "forward");
+    void saveActiveSessionPatch({ phase: next, previousPhase });
   };
 
   const returnFromSubpage = () => {
@@ -298,6 +405,12 @@ export function App() {
     }
     const next = previousScreen === "settings" || previousScreen === "history" ? "idle" : previousScreen;
     transitionToScreen(next, "back");
+    void saveActiveSessionPatch({ phase: next, previousPhase: next });
+  };
+
+  const selectActivePrompt = (next) => {
+    setActivePrompt(next);
+    void saveActiveSessionPatch({ activePrompt: next });
   };
 
   const updateSettings = async (patch) => {
@@ -313,13 +426,13 @@ export function App() {
     await saveSettings(next);
   };
 
-  const startCapture = (mode) => {
+  const startCapture = async (mode) => {
     if (!configured) {
       setPreviousScreen(screen);
       setScreen("required");
+      await saveActiveSessionPatch({ phase: "required", previousPhase: "required", generationId: "" });
       return;
     }
-    returnScreenRef.current = screen;
     setSelectionMode(mode);
     setSelectionHint(
       mode === "page"
@@ -329,6 +442,15 @@ export function App() {
           : "框选截图模式已开启。拖动鼠标绘制区域，按 Escape 取消。",
     );
     setScreen("idle");
+    pendingGenerationIdRef.current = "";
+    await saveActiveSessionPatch({
+      phase: "idle",
+      previousPhase: "idle",
+      generationId: "",
+      capture: null,
+      record: null,
+      error: "",
+    });
     if (isEmbedded) {
       postToHost("PC_START_SELECTION", { mode });
       return;
@@ -344,18 +466,37 @@ export function App() {
     setSelectionHint("");
     postToHost("PC_RESELECT");
     setScreen("idle");
+    if (screen === "error") void saveActiveSessionPatch({ phase: "idle", previousPhase: "idle", capture: null, record: null, error: "" });
   };
 
-  const confirmCandidate = () => {
+  const confirmCandidate = async () => {
     if (!candidate) return;
     setErrorMessage("");
     setGenerationImageHeight(224);
+    const pendingGenerationId = createGenerationId();
+    pendingGenerationIdRef.current = pendingGenerationId;
+    const pendingCapture = {
+      screenshotDataUrl: candidate.screenshotDataUrl || "",
+      thumbnailDataUrl: candidate.screenshotDataUrl || "",
+      selectionType: candidate.type || "region",
+      source: {
+        title: candidate.title || "来源网页标题",
+        url: candidate.url || "",
+      },
+    };
+    setScreen("generating");
+    await saveActiveSessionPatch({
+      phase: "generating",
+      previousPhase: "generating",
+      generationId: pendingGenerationId,
+      capture: pendingCapture,
+      record: null,
+      error: "",
+    });
     if (isEmbedded) {
-      setScreen("generating");
       postToHost("PC_CONFIRM_SELECTION");
       return;
     }
-    setScreen("generating");
     window.setTimeout(() => {
       const record = {
         ...createDemoRecord(`demo-${Date.now()}`),
@@ -371,7 +512,7 @@ export function App() {
     }, 1200);
   };
 
-  const retryGeneration = () => {
+  const retryGeneration = async () => {
     if (!retryCapture?.screenshotDataUrl) {
       setErrorMessage("原截图不可用，请重新选择后生成。");
       return;
@@ -379,6 +520,16 @@ export function App() {
     setErrorMessage("");
     setGenerationImageHeight(224);
     setScreen("generating");
+    const pendingGenerationId = createGenerationId();
+    pendingGenerationIdRef.current = pendingGenerationId;
+    await saveActiveSessionPatch({
+      phase: "generating",
+      previousPhase: "generating",
+      generationId: pendingGenerationId,
+      capture: retryCapture,
+      record: null,
+      error: "",
+    });
     if (isEmbedded) {
       postToHost("PC_RETRY_GENERATION", { capture: retryCapture });
       return;
@@ -561,7 +712,7 @@ export function App() {
   useEffect(() => {
     if (isPreview) return undefined;
     let live = true;
-    readStoredData().then((data) => {
+    Promise.all([readStoredData(), readActiveSession()]).then(([data, session]) => {
       if (!live) return;
       const storedSettings = normalizeSettings(data[STORAGE.settings]);
       setSettings(storedSettings);
@@ -569,9 +720,20 @@ export function App() {
         void saveSettings(storedSettings);
       }
       setHistory(Array.isArray(data[STORAGE.history]) ? data[STORAGE.history] : []);
-      if (!isSettingsComplete(storedSettings)) setScreen("required");
+      applyActiveSession(session);
+      if (!isSettingsComplete(storedSettings) && session.phase !== "settings") {
+        setScreen("required");
+        void saveActiveSessionPatch({ phase: "required", previousPhase: "required" });
+      } else if (isSettingsComplete(storedSettings) && session.phase === "required") {
+        void saveActiveSessionPatch({ phase: "idle", previousPhase: "idle" });
+      }
     });
     const onStorageChanged = (changes, area) => {
+      if (area === "session") {
+        const nextSession = changes[ACTIVE_SESSION_KEY]?.newValue;
+        if (nextSession) applyActiveSession(nextSession);
+        return;
+      }
       if (area !== "local") return;
       if (changes[STORAGE.settings]?.newValue) setSettings(normalizeSettings(changes[STORAGE.settings].newValue));
       if (changes[STORAGE.history]?.newValue) setHistory(changes[STORAGE.history].newValue || []);
@@ -604,22 +766,19 @@ export function App() {
       if (message.type === "PC_SELECTION_CANCELLED") {
         setCandidate(null);
         setSelectionMode("");
-        setScreen(returnScreenRef.current === "result" ? "result" : "idle");
+        refreshActiveSession();
       }
       if (message.type === "PC_GENERATION_SUCCESS") {
-        const record = message.payload?.record;
-        if (record) {
-          setCapture(record);
-          setHistory((items) => [record, ...items.filter((item) => item.id !== record.id)]);
-        }
-        setCandidate(null);
-        setSelectionMode("");
-        setRetryCapture(null);
-        setErrorMessage("");
-        setSelectionHint("");
-        setScreen("result");
+        pendingGenerationIdRef.current = "";
+        if (message.payload?.session) applyActiveSession(message.payload.session);
+        else refreshActiveSession();
       }
       if (message.type === "PC_GENERATION_ERROR") {
+        if (message.payload?.session) {
+          pendingGenerationIdRef.current = "";
+          applyActiveSession(message.payload.session);
+          return;
+        }
         const failedCapture = {
           screenshotDataUrl: message.payload?.screenshotDataUrl || "",
           selectionType: message.payload?.selection?.type || "region",
@@ -628,20 +787,34 @@ export function App() {
             url: message.payload?.selection?.url || "",
           },
         };
-        setRetryCapture(failedCapture);
-        if (failedCapture.screenshotDataUrl) setCapture((current) => ({ ...(current || createDemoRecord("failed-capture")), ...failedCapture, thumbnailDataUrl: failedCapture.screenshotDataUrl }));
         setCandidate(null);
         setSelectionMode("");
-        setErrorMessage(message.payload?.error || "生成失败，请重试");
         setSelectionHint("");
-        setScreen("error");
+        const expectedGenerationId = pendingGenerationIdRef.current;
+        void saveActiveSessionPatch({
+          phase: "error",
+          previousPhase: "error",
+          generationId: expectedGenerationId,
+          capture: failedCapture,
+          record: null,
+          error: message.payload?.error || "生成失败，请重试",
+        }, expectedGenerationId).then((session) => {
+          pendingGenerationIdRef.current = "";
+          applyActiveSession(session);
+        });
       }
       if (message.type === "PC_SELECTION_HINT") setSelectionHint(message.payload?.text || "");
       if (message.type === "PC_START_SHORTCUT") startCapture("region");
       if (message.type === "PC_SHOW_TOOLBAR") {
+        if (message.payload?.session) applyActiveSession(message.payload.session);
+        else refreshActiveSession();
         if (!configured) setScreen("required");
       }
-      if (message.type === "PC_FORCE_REQUIRED") setScreen("required");
+      if (message.type === "PC_ACTIVE_SESSION") applyActiveSession(message.payload?.session);
+      if (message.type === "PC_FORCE_REQUIRED") {
+        setScreen("required");
+        void saveActiveSessionPatch({ phase: "required", previousPhase: "required" });
+      }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
@@ -737,7 +910,7 @@ export function App() {
             <ResultState
               record={activeRecord}
               activePrompt={activePrompt}
-              setActivePrompt={setActivePrompt}
+              setActivePrompt={selectActivePrompt}
               copied={copied}
               copyError={copyError}
               onCopy={copyCurrentPrompt}
@@ -759,7 +932,7 @@ export function App() {
               expandedId={expandedHistoryId}
               setExpandedId={setExpandedHistoryId}
               activePrompt={activePrompt}
-              setActivePrompt={setActivePrompt}
+              setActivePrompt={selectActivePrompt}
               copied={copied}
               copyError={copyError}
               onCopy={copyCurrentPrompt}
@@ -1198,7 +1371,7 @@ function SettingsState({ settings, notice, onUpdate, onTest, onClear }) {
           <button type="button" onClick={onClear}>清理历史</button>
         </div>
       </section>
-      <p className="settings-version">v0.2.5</p>
+      <p className="settings-version">v0.2.6</p>
     </div>
   );
 }

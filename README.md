@@ -9,9 +9,13 @@
 Prompt Capture 是一款基于 Chrome Manifest V3 的视觉灵感采集扩展。点击扩展图标后，网页内会出现可拖动的悬浮工具栏，无需离开当前页面即可完成采集和 Prompt 生成。
 
 - 支持框选网页区域、直接选择网页图片和采集当前页面。
+- 整个 Chrome 同一时间只显示一个工具栏；切换标签页或 Chrome 窗口时，工具栏会移动到最后聚焦窗口的活动网页。
+- 工具栏位置、分析进度、生成结果、历史/设置页面和当前 Prompt 类型会在标签页与窗口之间保持一致。
+- 再次点击扩展图标或关闭工具栏会全局隐藏；同一次 Chrome 运行期间重新开启会恢复关闭前的工具栏页面。
+- 进入历史或设置时，会自动取消尚未确认的图片选择、当前页面或框选截图。
 - 选中内容后可预览、重选并确认生成。
 - 生成图片 Prompt、风格 Prompt 和布局 Prompt。
-- 支持阿里云百炼、火山引擎方舟和 OpenAI Compatible 视觉模型。
+- 支持阿里云百炼、火山引擎方舟和自定义 OpenAI 兼容视觉模型。
 - 支持中文、英文和中英双语输出。
 - 历史截图、Prompt 和模型配置保存在当前浏览器本地。
 - 默认快捷键：Windows/Linux 使用 `Alt + Shift + C`，macOS 使用 `Option + Shift + C`。
@@ -21,7 +25,7 @@ Prompt Capture 是一款基于 Chrome Manifest V3 的视觉灵感采集扩展。
 ### 使用 Release 安装包
 
 1. 打开仓库右侧的 **Releases** 页面。
-2. 下载最新版本的 `Prompt-Capture-v0.2.5.zip`。
+2. 下载最新版本的 `Prompt-Capture-v0.2.6.zip`。
 3. 将 ZIP 完整解压到一个固定文件夹，不要直接从压缩包内打开。
 4. 在 Chrome 地址栏输入 `chrome://extensions/`。
 5. 打开页面右上角的“开发者模式”。
@@ -62,16 +66,18 @@ Prompt Capture 是一款基于 Chrome Manifest V3 的视觉灵感采集扩展。
 
 按 `Esc` 可以退出正在进行的网页选择。
 
+切换标签页或 Chrome 窗口时，尚未确认的图片选择、当前页面候选或框选区域会自动取消；已经确认的分析会继续在后台运行，新活动网页会继续显示分析进度和最终结果。
+
 ## 权限与隐私
 
 扩展使用以下主要权限：
 
 - `activeTab`、`tabs`、`scripting`：在用户主动触发时读取当前标签页并注入采集界面。
 - `captureVisibleTab` 相关能力：截取当前可见网页内容并按选区裁剪。
-- `storage`：在浏览器本地保存设置、截图和 Prompt 历史。
+- `storage`：在浏览器本地保存设置、截图、Prompt 历史、工具栏位置，以及当前 Chrome 运行期间的分析状态。
 - `clipboardWrite`、`offscreen`：将生成的 Prompt 复制到剪贴板。
 
-API Key、模型配置、截图和历史记录保存在 `chrome.storage.local`。生成或测试连接时，截图和 API Key 会发送到设置页中填写的模型接口地址。请只使用你信任的服务商和接口地址。
+API Key、模型配置、截图和历史记录保存在 `chrome.storage.local`。当前分析进度和结果页面保存在 `chrome.storage.session`，完全退出 Chrome 后会自动清空。生成或测试连接时，截图和 API Key 会发送到设置页中填写的模型接口地址。请只使用你信任的服务商和接口地址。
 
 Chrome 内置页面、扩展管理页和 Chrome Web Store 等受保护页面不允许内容脚本注入，因此无法采集。
 
@@ -104,4 +110,4 @@ dist/      可直接加载的生产构建
 
 ## 当前版本
 
-`v0.2.5`
+`v0.2.6`
